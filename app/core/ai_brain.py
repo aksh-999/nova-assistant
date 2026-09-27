@@ -9,7 +9,7 @@ load_dotenv()
 
 
 # ============================================================
-# GEMINI SETUP
+# AI CONFIGURATION
 # ============================================================
 
 api_key = os.getenv("GEMINI_API_KEY")
@@ -25,10 +25,6 @@ if api_key:
     )
 
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
 GEMINI_MODEL = "gemini-3.8-flash"
 
 OLLAMA_MODEL = "llama3.2:3b"
@@ -37,10 +33,24 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 
 
 # ============================================================
-# SHARED NOVA PROMPT
+# PROMPT BUILDER
 # ============================================================
 
-def build_prompt(user_text):
+def build_prompt(user_text, memory_context=None):
+
+    memory_section = ""
+
+    if memory_context:
+        memory_section = f"""
+Relevant memories about the user:
+
+{memory_context}
+
+Use these memories when they are relevant.
+Do not mention the memory system unless the user asks about it.
+Do not invent information that is not present in the memories.
+"""
+
     return f"""
 You are Nova, a personal AI voice assistant.
 
@@ -48,6 +58,8 @@ You are running on the user's computer.
 
 Be helpful, natural, concise and practical.
 The response may be spoken aloud, so avoid unnecessary long explanations.
+
+{memory_section}
 
 User:
 {user_text}
@@ -60,24 +72,19 @@ Respond directly to the user.
 # GEMINI
 # ============================================================
 
-def ask_gemini(user_text):
-    """
-    Ask Gemini for a response.
-
-    Returns:
-        str | None
-
-    Returns None if Gemini is unavailable,
-    times out, or encounters an error.
-    """
+def ask_gemini(user_text, memory_context=None):
 
     if gemini_client is None:
         print("[Gemini] API key not available.")
         return None
 
-    prompt = build_prompt(user_text)
+    prompt = build_prompt(
+        user_text,
+        memory_context
+    )
 
     try:
+
         print("[Nova AI] Trying Gemini...")
 
         response = gemini_client.models.generate_content(
@@ -92,7 +99,9 @@ def ask_gemini(user_text):
         return response.text.strip()
 
     except Exception as e:
+
         print(f"[Gemini unavailable] {e}")
+
         return None
 
 
@@ -100,17 +109,12 @@ def ask_gemini(user_text):
 # OLLAMA
 # ============================================================
 
-def ask_ollama(user_text):
-    """
-    Ask the local Ollama model for a response.
+def ask_ollama(user_text, memory_context=None):
 
-    Returns:
-        str | None
-
-    Returns None if Ollama is unavailable.
-    """
-
-    prompt = build_prompt(user_text)
+    prompt = build_prompt(
+        user_text,
+        memory_context
+    )
 
     payload = {
         "model": OLLAMA_MODEL,
@@ -119,6 +123,7 @@ def ask_ollama(user_text):
     }
 
     try:
+
         print("[Nova AI] Trying local Ollama...")
 
         response = requests.post(
@@ -140,50 +145,47 @@ def ask_ollama(user_text):
         return result.strip()
 
     except Exception as e:
+
         print(f"[Ollama unavailable] {e}")
+
         return None
 
 
 # ============================================================
-# MAIN AI ROUTER
+# MAIN AI FUNCTION
 # ============================================================
 
-def ask_ai(user_text):
-    """
-    Nova's main AI entry point.
+def ask_ai(user_text, memory_context=None):
 
-    Priority:
-
-        1. Gemini
-        2. Ollama
-        3. Friendly fallback message
-    """
-
-    # --------------------------------------------------------
-    # 1. Try Gemini
-    # --------------------------------------------------------
-
-    gemini_response = ask_gemini(user_text)
+    gemini_response = ask_gemini(
+        user_text,
+        memory_context
+    )
 
     if gemini_response:
+
         print("[Nova AI] Using Gemini")
+
         return gemini_response
 
-    # --------------------------------------------------------
-    # 2. Gemini failed → Ollama
-    # --------------------------------------------------------
 
-    print("[Nova AI] Gemini unavailable. Switching to Ollama...")
+    print(
+        "[Nova AI] Gemini unavailable. "
+        "Switching to Ollama..."
+    )
 
-    ollama_response = ask_ollama(user_text)
+
+    ollama_response = ask_ollama(
+        user_text,
+        memory_context
+    )
 
     if ollama_response:
+
         print("[Nova AI] Using Ollama")
+
         return ollama_response
 
-    # --------------------------------------------------------
-    # 3. Both failed
-    # --------------------------------------------------------
 
     return (
         "I'm having trouble connecting to my AI systems right now. "
@@ -195,9 +197,12 @@ def ask_ai(user_text):
 # BACKWARD COMPATIBILITY
 # ============================================================
 
-def ask_gemini_with_fallback(user_text):
-    """
-    Backward-compatible function name.
-    """
+def ask_gemini_with_fallback(
+    user_text,
+    memory_context=None
+):
 
-    return ask_ai(user_text)    
+    return ask_ai(
+        user_text,
+        memory_context
+    )
