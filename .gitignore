@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+voice.wav
+screenshot_*.png
+test_screenshot.png
+
+app/memory/nova_memory.db
+backend/.pnv
