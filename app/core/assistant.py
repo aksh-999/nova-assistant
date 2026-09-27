@@ -14,10 +14,6 @@ class NovaAssistant:
 
     def get_memory_context(self, user_text, limit=5):
 
-        # --------------------------------------------------------
-        # 1. Try the complete user query first
-        # --------------------------------------------------------
-
         memories = self.memory.search(
             user_text,
             limit=limit
@@ -34,10 +30,6 @@ class NovaAssistant:
                 )
 
             return "\n".join(lines)
-
-        # --------------------------------------------------------
-        # 2. If no direct match, search useful keywords
-        # --------------------------------------------------------
 
         words = [
             word.strip(".,!?")
@@ -65,16 +57,8 @@ class NovaAssistant:
                         memory["id"]
                     )
 
-        # --------------------------------------------------------
-        # 3. Nothing relevant found
-        # --------------------------------------------------------
-
         if not collected:
             return None
-
-        # --------------------------------------------------------
-        # 4. Important memories first
-        # --------------------------------------------------------
 
         collected.sort(
             key=lambda memory: (
@@ -83,10 +67,6 @@ class NovaAssistant:
             ),
             reverse=True
         )
-
-        # --------------------------------------------------------
-        # 5. Build AI context
-        # --------------------------------------------------------
 
         lines = []
 
@@ -99,6 +79,180 @@ class NovaAssistant:
         return "\n".join(lines)
 
     # ============================================================
+    # RECENT CONVERSATION
+    # ============================================================
+
+    def get_conversation_context(self, limit=10):
+
+        messages = self.memory.get_recent_messages(
+            limit=limit
+        )
+
+        if not messages:
+            return None
+
+        lines = []
+
+        for message in messages:
+
+            role = message["role"].capitalize()
+
+            lines.append(
+                f"{role}: {message['content']}"
+            )
+
+        return "\n".join(lines)
+
+    # ============================================================
+    # COMBINED AI CONTEXT
+    # ============================================================
+
+    def get_ai_context(self, user_text):
+
+        memory_context = self.get_memory_context(
+            user_text
+        )
+
+        conversation_context = (
+            self.get_conversation_context(
+                limit=10
+            )
+        )
+
+        sections = []
+
+        if memory_context:
+
+            sections.append(
+                "LONG-TERM MEMORY:\n"
+                + memory_context
+            )
+
+        if conversation_context:
+
+            sections.append(
+                "RECENT CONVERSATION:\n"
+                + conversation_context
+            )
+
+        if not sections:
+            return None
+
+        return "\n\n".join(sections)
+
+    # ============================================================
+    # AUTOMATIC MEMORY DETECTION
+    # ============================================================
+
+    def detect_automatic_memory(self, user_text):
+
+        text = user_text.lower().strip()
+
+        memory_patterns = [
+            "my name is ",
+            "i am ",
+            "i'm ",
+            "i use ",
+            "i prefer ",
+            "i like ",
+            "i love ",
+            "i live in ",
+            "i study ",
+            "i'm studying ",
+            "i am studying ",
+            "i work on ",
+            "i'm working on ",
+            "i am working on ",
+            "i am building ",
+            "i'm building ",
+            "my startup is ",
+            "my project is ",
+        ]
+
+        for pattern in memory_patterns:
+
+            if text.startswith(pattern):
+
+                value = user_text[
+                    len(pattern):
+                ].strip()
+
+                if not value:
+                    return
+
+                # Ignore very short or conversational statements
+                if len(value) < 3:
+                    return
+
+                # Avoid saving questions
+                if "?" in value:
+                    return
+
+                # Avoid saving temporary actions
+                temporary_words = [
+                    "today",
+                    "now",
+                    "right now",
+                    "currently",
+                    "just",
+                    "going to",
+                ]
+
+                if value.lower() in temporary_words:
+                    return
+
+                # Determine category
+                category = "general"
+
+                if (
+                    "startup" in text
+                    or "project" in text
+                    or "building" in text
+                    or "working on" in text
+                ):
+                    category = "project"
+
+                elif (
+                    "study" in text
+                    or "studying" in text
+                ):
+                    category = "education"
+
+                elif (
+                    "prefer" in text
+                    or "like" in text
+                    or "love" in text
+                ):
+                    category = "preference"
+
+                elif "name" in text:
+                    category = "personal"
+
+                elif "use" in text:
+                    category = "technology"
+
+                elif "live" in text:
+                    category = "location"
+
+                # Important personal facts get higher priority
+                importance = 1
+
+                if (
+                    category == "personal"
+                    or category == "project"
+                ):
+                    importance = 2
+
+                self.memory.remember(
+                    key=category,
+                    value=user_text,
+                    category=category,
+                    importance=importance
+                )
+
+                return
+
+    # ============================================================
     # PROCESS USER INPUT
     # ============================================================
 
@@ -107,7 +261,48 @@ class NovaAssistant:
         text = user_text.lower().strip()
 
         # ========================================================
-        # REMEMBER
+        # CLEAR CONVERSATION
+        # ========================================================
+
+        clear_commands = [
+            "clear our conversation",
+            "clear conversation",
+            "clear chat",
+            "clear chat history",
+            "forget this conversation",
+            "forget our conversation",
+            "start a new conversation",
+            "start new conversation",
+            "new conversation"
+        ]
+
+        if text in clear_commands:
+
+            self.memory.clear_conversation()
+
+            response = (
+                "Conversation cleared. "
+                "Your saved memories are still safe."
+            )
+
+            self.memory.add_message(
+                role="assistant",
+                content=response
+            )
+
+            return response
+
+        # ========================================================
+        # SAVE USER MESSAGE
+        # ========================================================
+
+        self.memory.add_message(
+            role="user",
+            content=user_text
+        )
+
+        # ========================================================
+        # EXPLICIT REMEMBER
         # ========================================================
 
         if text.startswith("remember that "):
@@ -123,7 +318,14 @@ class NovaAssistant:
                 importance=2
             )
 
-            return "I'll remember that."
+            response = "I'll remember that."
+
+            self.memory.add_message(
+                role="assistant",
+                content=response
+            )
+
+            return response
 
         # ========================================================
         # FORGET
@@ -141,10 +343,17 @@ class NovaAssistant:
 
             if not memories:
 
-                return (
+                response = (
                     "I couldn't find anything "
                     "matching that memory."
                 )
+
+                self.memory.add_message(
+                    role="assistant",
+                    content=response
+                )
+
+                return response
 
             deleted = 0
 
@@ -162,12 +371,21 @@ class NovaAssistant:
 
             if deleted:
 
-                return "I've forgotten that."
+                response = "I've forgotten that."
 
-            return (
-                "I couldn't find an exact "
-                "memory matching that."
+            else:
+
+                response = (
+                    "I couldn't find an exact "
+                    "memory matching that."
+                )
+
+            self.memory.add_message(
+                role="assistant",
+                content=response
             )
+
+            return response
 
         # ========================================================
         # WHAT DO YOU REMEMBER?
@@ -183,10 +401,17 @@ class NovaAssistant:
 
             if not memories:
 
-                return (
+                response = (
                     "I don't have any memories "
                     "saved yet."
                 )
+
+                self.memory.add_message(
+                    role="assistant",
+                    content=response
+                )
+
+                return response
 
             important = [
                 memory
@@ -208,10 +433,17 @@ class NovaAssistant:
                     f"- {memory['value']}"
                 )
 
-            return (
+            response = (
                 "Here's what I remember:\n"
                 + "\n".join(lines)
             )
+
+            self.memory.add_message(
+                role="assistant",
+                content=response
+            )
+
+            return response
 
         # ========================================================
         # WHAT AM I WORKING ON?
@@ -230,24 +462,45 @@ class NovaAssistant:
 
             if memories:
 
-                return (
+                response = (
                     f"You told me: "
                     f"{memories[0]['value']}"
                 )
+
+                self.memory.add_message(
+                    role="assistant",
+                    content=response
+                )
+
+                return response
 
             memories = self.memory.get_all()
 
             if not memories:
 
-                return (
+                response = (
                     "I don't have anything "
                     "saved yet."
                 )
 
-            return (
+                self.memory.add_message(
+                    role="assistant",
+                    content=response
+                )
+
+                return response
+
+            response = (
                 f"You told me: "
                 f"{memories[0]['value']}"
             )
+
+            self.memory.add_message(
+                role="assistant",
+                content=response
+            )
+
+            return response
 
         # ========================================================
         # SEARCH MEMORY
@@ -267,10 +520,17 @@ class NovaAssistant:
 
             if not results:
 
-                return (
+                response = (
                     "I couldn't find anything "
                     "matching that."
                 )
+
+                self.memory.add_message(
+                    role="assistant",
+                    content=response
+                )
+
+                return response
 
             lines = []
 
@@ -280,10 +540,25 @@ class NovaAssistant:
                     f"- {memory['value']}"
                 )
 
-            return (
+            response = (
                 "I found these memories:\n"
                 + "\n".join(lines)
             )
+
+            self.memory.add_message(
+                role="assistant",
+                content=response
+            )
+
+            return response
+
+        # ========================================================
+        # AUTOMATIC MEMORY
+        # ========================================================
+
+        self.detect_automatic_memory(
+            user_text
+        )
 
         # ========================================================
         # COMPUTER TOOLS
@@ -295,13 +570,18 @@ class NovaAssistant:
 
         if tool_response:
 
+            self.memory.add_message(
+                role="assistant",
+                content=tool_response
+            )
+
             return tool_response
 
         # ========================================================
-        # SMART MEMORY RETRIEVAL
+        # AI CONTEXT
         # ========================================================
 
-        memory_context = self.get_memory_context(
+        ai_context = self.get_ai_context(
             user_text
         )
 
@@ -309,10 +589,21 @@ class NovaAssistant:
         # AI
         # ========================================================
 
-        return ask_ai(
+        response = ask_ai(
             user_text,
-            memory_context
+            ai_context
         )
+
+        # ========================================================
+        # SAVE AI RESPONSE
+        # ========================================================
+
+        self.memory.add_message(
+            role="assistant",
+            content=response
+        )
+
+        return response
 
     # ============================================================
     # PUBLIC MEMORY METHODS
